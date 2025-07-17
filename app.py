@@ -9,7 +9,7 @@ from flask_cors import CORS
 import openai
 import assemblyai as aai
 
-# Inicialização do Flask e clientes
+# Inicialização do Flask e dos clientes de API
 app = Flask(__name__)
 CORS(app)
 
@@ -18,7 +18,7 @@ AAI = aai.Client(os.getenv("ASSEMBLYAI_API_KEY"))
 
 @app.route("/")
 def home():
-    # Serve o front-end em templates/index.html
+    # Serve o front-end que está em templates/index.html
     return render_template("index.html")
 
 @app.route("/transcrever", methods=["POST"])
@@ -28,6 +28,7 @@ def transcrever():
         return jsonify({"erro": "campo 'audio' não enviado"}), 400
 
     audio_file = request.files["audio"]
+
     # 2) Salva em arquivo temporário
     tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".webm")
     audio_path = tmp.name
