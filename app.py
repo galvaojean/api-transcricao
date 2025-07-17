@@ -1,48 +1,37 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, render_template
 from flask_cors import CORS
-import openai
-import os
-import tempfile
+import openai, os, tempfile
 
 app = Flask(__name__)
 CORS(app)
-
-# pega a chave da OpenAI da variável de ambiente configurada no Render
 openai.api_key = os.getenv('OPENAI_API_KEY')
 
-@app.route("/", methods=["GET"])
+# Rota que serve a interface
+@app.route("/")
 def home():
-    return "API de Transcrição online. Envie áudio via POST /transcrever (campo 'audio')."
+    return render_template("index.html")
 
-# Aceita POST na raiz e em /transcrever (pra facilitar)
-@app.route("/", methods=["POST"])
+# Rota de transcrição
 @app.route("/transcrever", methods=["POST"])
 def transcrever():
     if 'audio' not in request.files:
-        return jsonify({"erro": "campo 'audio' não encontrado no upload"}), 400
+        return jsonify({"erro": "campo 'audio' não enviado"}), 400
 
-    audio_storage = request.files['audio']
-
-    # Salva o arquivo temporariamente
+    f = request.files['audio']
     with tempfile.NamedTemporaryFile(delete=False, suffix=".webm") as tmp:
-        temp_path = tmp.name
-        audio_storage.save(temp_path)
+        f.save(tmp.name)
+        path = tmp.name
 
     try:
-        with open(temp_path, "rb") as af:
+        with open(path, "rb") as af:
             resp = openai.Audio.transcribe("whisper-1", af)
-        texto = resp.get("text", "")
+        txt = resp.get("text", "")
     except Exception as e:
         return jsonify({"erro": str(e)}), 500
     finally:
-        try:
-            os.remove(temp_path)
-        except Exception:
-            pass
+        os.remove(path)
 
-    return jsonify({"transcricao": texto})
-    
+    return jsonify({"transcricao": txt})
 
 if __name__ == "__main__":
-    # Render ignora isso quando usa gunicorn, mas deixa aqui pra rodar local
     app.run(host="0.0.0.0", port=10000)
