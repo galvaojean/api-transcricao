@@ -13,12 +13,13 @@ import assemblyai as aai
 app = Flask(__name__)
 CORS(app)
 
+# Chaves lidas do ambiente
 openai.api_key = os.getenv("OPENAI_API_KEY")
-AAI = aai.Client(os.getenv("ASSEMBLYAI_API_KEY"))
+AAI = aai.Client()  # não passar a chave aqui, o SDK usa a env var
 
 @app.route("/")
 def home():
-    # Serve o front-end que está em templates/index.html
+    # Serve a interface em templates/index.html
     return render_template("index.html")
 
 @app.route("/transcrever", methods=["POST"])
@@ -27,9 +28,8 @@ def transcrever():
     if "audio" not in request.files:
         return jsonify({"erro": "campo 'audio' não enviado"}), 400
 
-    audio_file = request.files["audio"]
-
     # 2) Salva em arquivo temporário
+    audio_file = request.files["audio"]
     tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".webm")
     audio_path = tmp.name
     audio_file.save(audio_path)
