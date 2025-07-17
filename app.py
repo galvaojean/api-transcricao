@@ -13,13 +13,12 @@ import assemblyai as aai
 app = Flask(__name__)
 CORS(app)
 
-# Chaves lidas do ambiente
+# Lê as chaves de API das variáveis de ambiente
 openai.api_key = os.getenv("OPENAI_API_KEY")
-AAI = aai.Client()  # não passar a chave aqui, o SDK usa a env var
+AAI = aai.Client()  # NÃO passe nada aqui — o SDK busca ASSEMBLYAI_API_KEY por conta própria
 
 @app.route("/")
 def home():
-    # Serve a interface em templates/index.html
     return render_template("index.html")
 
 @app.route("/transcrever", methods=["POST"])
