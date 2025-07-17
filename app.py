@@ -2,32 +2,31 @@ import os
 import time
 import tempfile
 import json
-
 from flask import Flask, request, jsonify, render_template
-from flask-cors import CORS
-
+from flask_cors import CORS
 import openai
 import assemblyai as aai
 
-# Inicialização do Flask e dos clientes de API
+# Inicialização do Flask e CORS
 app = Flask(__name__)
 CORS(app)
 
-# Lê as chaves de API das variáveis de ambiente
+# 1) Configura as chaves de API a partir das env vars
 openai.api_key = os.getenv("OPENAI_API_KEY")
-AAI = aai.Client()  # NÃO passe nada aqui — o SDK busca ASSEMBLYAI_API_KEY por conta própria
+aai.settings.api_key = os.getenv("ASSEMBLYAI_API_KEY")  # :contentReference[oaicite:0]{index=0}
 
 @app.route("/")
 def home():
+    # Renderiza o HTML em templates/index.html
     return render_template("index.html")
 
 @app.route("/transcrever", methods=["POST"])
 def transcrever():
-    # 1) Verifica se veio o áudio
+    # 2) Valida que veio áudio no form
     if "audio" not in request.files:
         return jsonify({"erro": "campo 'audio' não enviado"}), 400
 
-    # 2) Salva em arquivo temporário
+    # 3) Salva o áudio em arquivo temporário
     audio_file = request.files["audio"]
     tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".webm")
     audio_path = tmp.name
@@ -35,30 +34,30 @@ def transcrever():
     tmp.close()
 
     try:
-        # 3) Upload + diarização na AssemblyAI
-        upload_resp = AAI.upload(audio_path)
-        tx = AAI.transcript.create(
-            audio_url=upload_resp["upload_url"],
-            speaker_labels=True
-        )
-        transcript_id = tx["id"]
+        # 4) Faz upload e transcrição com diarização
+        transcriber = aai.Transcriber()  # :contentReference[oaicite:1]{index=1}
 
-        # 4) Polling até completar ou erro
-        while True:
-            status = AAI.transcript.get(transcript_id)
-            if status["status"] in ("completed", "error"):
-                break
-            time.sleep(2)
+        # Leitura binária e upload
+        with open(audio_path, "rb") as f:
+            data = f.read()
+        upload_url = transcriber.upload_file(data)
 
-        if status["status"] == "error":
-            return jsonify({"erro": status.get("error", "erro desconhecido")}), 500
+        # Cria config para habilitar speaker_labels
+        config = aai.TranscriptionConfig(speaker_labels=True)
+        transcript = transcriber.transcribe(upload_url, config=config)
 
-        full_text = status["text"]
-        utterances = status.get("utterances", [])
+        # Extrai texto completo e lista de utterances
+        full_text = transcript.text
+        utterances = [
+            { "speaker": u.speaker, "start": u.start, "end": u.end, "text": u.text }
+            for u in (transcript.utterances or [])
+        ]
 
         # 5) Gera resumo e insights via OpenAI
         summary, insights = gerar_resumo_insights(full_text)
 
+    except Exception as e:
+        return jsonify({"erro": str(e)}), 500
     finally:
         # 6) Limpa o arquivo temporário
         try:
@@ -66,13 +65,14 @@ def transcrever():
         except OSError:
             pass
 
-    # 7) Retorna JSON unificado
+    # 7) Retorna JSON final
     return jsonify({
         "transcricao": full_text,
         "diarizacao": utterances,
         "resumo": summary,
         "insights": insights
     })
+
 
 def gerar_resumo_insights(texto_completo: str):
     prompt = f"""
@@ -83,8 +83,8 @@ Você é um assistente que recebe a transcrição completa de uma reunião:
 1) Forneça um resumo executivo em até 5 frases.
 2) Liste 5 insights ou próximos passos em formato de bullets.
 
-Responda apenas com um JSON no formato:
-{{ "resumo": "...", "insights": ["...", "...", ...] }}
+Responda apenas em JSON, no formato:
+{{"resumo":"...","insights":["...","...",...]}}
 """
     resp = openai.ChatCompletion.create(
         model="gpt-4",
@@ -93,7 +93,10 @@ Responda apenas com um JSON no formato:
     )
     content = resp.choices[0].message.content.strip()
     data = json.loads(content)
-    return data["resumo"], data["insights"]
+    return data.get("resumo", ""), data.get("insights", [])
+
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=10000)
+    # Usa a porta definida pelo Render ou fallback para 5000
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port)
