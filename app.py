@@ -17,6 +17,7 @@ aai.settings.api_key = os.getenv("ASSEMBLYAI_API_KEY")
 
 @app.route("/")
 def home():
+    # Renderiza o front-end em templates/index.html
     return render_template("index.html")
 
 @app.route("/transcrever", methods=["POST"])
@@ -25,7 +26,7 @@ def transcrever():
     if "audio" not in request.files:
         return jsonify({"erro": "campo 'audio' não enviado"}), 400
 
-    # 3) Salva áudio em arquivo temporário
+    # 3) Salva o áudio em arquivo temporário
     audio_file = request.files["audio"]
     tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".webm")
     audio_path = tmp.name
@@ -53,9 +54,11 @@ def transcrever():
     except Exception as e:
         return jsonify({"erro": str(e)}), 500
     finally:
-        # 6) Limpa arquivo temporário
-        try: os.remove(audio_path)
-        except OSError: pass
+        # 6) Limpa o arquivo temporário
+        try:
+            os.remove(audio_path)
+        except OSError:
+            pass
 
     # 7) Retorna tudo em JSON
     return jsonify({
@@ -77,9 +80,9 @@ Você é um assistente que recebe a transcrição completa de uma reunião:
 Responda apenas em JSON, no formato:
 {{"resumo":"...","insights":["...","...",...]}}
 """
-    # Nova interface para openai>=1.0.0
+    # 8) Usa gpt-3.5-turbo em vez de gpt-4
     resp = openai.chat.completions.create(
-        model="gpt-4",
+        model="gpt-3.5-turbo",
         messages=[{"role": "user", "content": prompt}],
         temperature=0.3
     )
