@@ -4,7 +4,7 @@ import tempfile
 import json
 
 from flask import Flask, request, jsonify, render_template
-from flask_cors import CORS
+from flask-cors import CORS
 
 import openai
 import assemblyai as aai
