@@ -9,7 +9,7 @@ from flask_cors import CORS
 import openai
 import assemblyai as aai
 
-# Inicialização
+# Inicialização do Flask e clientes
 app = Flask(__name__)
 CORS(app)
 
@@ -18,24 +18,24 @@ AAI = aai.Client(os.getenv("ASSEMBLYAI_API_KEY"))
 
 @app.route("/")
 def home():
-    # Serve a interface estática em templates/index.html
+    # Serve o front-end em templates/index.html
     return render_template("index.html")
 
 @app.route("/transcrever", methods=["POST"])
 def transcrever():
-    # 1) Recebe o áudio enviado pelo cliente
+    # 1) Verifica se veio o áudio
     if "audio" not in request.files:
         return jsonify({"erro": "campo 'audio' não enviado"}), 400
 
     audio_file = request.files["audio"]
-    # salva em arquivo temporário
+    # 2) Salva em arquivo temporário
     tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".webm")
     audio_path = tmp.name
     audio_file.save(audio_path)
     tmp.close()
 
     try:
-        # 2) Envia para AssemblyAI com diarização de speakers
+        # 3) Upload + diarização na AssemblyAI
         upload_resp = AAI.upload(audio_path)
         tx = AAI.transcript.create(
             audio_url=upload_resp["upload_url"],
@@ -43,7 +43,7 @@ def transcrever():
         )
         transcript_id = tx["id"]
 
-        # 3) Polling até a transcrição ficar pronta
+        # 4) Polling até completar ou erro
         while True:
             status = AAI.transcript.get(transcript_id)
             if status["status"] in ("completed", "error"):
@@ -56,17 +56,17 @@ def transcrever():
         full_text = status["text"]
         utterances = status.get("utterances", [])
 
-        # 4) Gera resumo e insights via OpenAI
+        # 5) Gera resumo e insights via OpenAI
         summary, insights = gerar_resumo_insights(full_text)
 
     finally:
-        # 5) Cleanup do arquivo temporário
+        # 6) Limpa o arquivo temporário
         try:
             os.remove(audio_path)
         except OSError:
             pass
 
-    # 6) Retorna o JSON com tudo
+    # 7) Retorna JSON unificado
     return jsonify({
         "transcricao": full_text,
         "diarizacao": utterances,
