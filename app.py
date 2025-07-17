@@ -27,9 +27,8 @@ def transcrever():
     if "audio" not in request.files:
         return jsonify({"erro": "campo 'audio' não enviado"}), 400
 
-    audio_file = request.files["audio"]
-
     # 2) Salva em arquivo temporário
+    audio_file = request.files["audio"]
     tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".webm")
     audio_path = tmp.name
     audio_file.save(audio_path)
