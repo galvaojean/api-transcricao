@@ -1,5 +1,5 @@
-flask
-flask-cors
-openai
-gunicorn
-assemblyai
+Flask==2.2.5
+flask-cors==4.0.1
+openai==0.28.0
+assemblyai==1.3.0
+gunicorn==20.1.0
