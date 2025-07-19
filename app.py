@@ -2,94 +2,96 @@ import os
 import time
 import tempfile
 import json
+
 from flask import Flask, request, jsonify, render_template
 from flask_cors import CORS
 import openai
 import assemblyai as aai
 
-# Inicialização do Flask e CORS
-app = Flask(__name__)
+# Inicializa Flask e CORS
+app = Flask(__name__, template_folder="templates")
 CORS(app)
 
-# 1) Configura as chaves de API
+# Chaves de API (definidas como variáveis de ambiente no Render)
 openai.api_key = os.getenv("OPENAI_API_KEY")
-aai.settings.api_key = os.getenv("ASSEMBLYAI_API_KEY")
+AAI = aai.Client()  # o SDK já lê ASSEMBLYAI_API_KEY do env
 
 @app.route("/")
 def home():
-    # Renderiza o front-end em templates/index.html
+    # Serve o front-end
     return render_template("index.html")
 
 @app.route("/transcrever", methods=["POST"])
 def transcrever():
-    # 2) Valida presença do áudio
+    # 1) Verifica se o áudio veio
     if "audio" not in request.files:
         return jsonify({"erro": "campo 'audio' não enviado"}), 400
 
-    # 3) Salva o áudio em arquivo temporário
+    # 2) Salva em arquivo temporário
     audio_file = request.files["audio"]
     tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".webm")
     audio_path = tmp.name
-    audio_file.save(audio_path)
     tmp.close()
+    audio_file.save(audio_path)
 
     try:
-        # 4) Upload + diarização na AssemblyAI
-        transcriber = aai.Transcriber()
-        with open(audio_path, "rb") as f:
-            upload_url = transcriber.upload_file(f.read())
+        # 3) Upload + diarização na AssemblyAI
+        upload_resp = AAI.upload(audio_path)
+        tx       = AAI.transcript.create(
+            audio_url       = upload_resp["upload_url"],
+            speaker_labels  = True
+        )
+        transcript_id = tx["id"]
 
-        config = aai.TranscriptionConfig(speaker_labels=True)
-        transcript = transcriber.transcribe(upload_url, config=config)
+        # 4) Polling até completar
+        while True:
+            status = AAI.transcript.get(transcript_id)
+            if status["status"] in ("completed", "error"):
+                break
+            time.sleep(2)
 
-        full_text = transcript.text
-        utterances = [
-            {"speaker": u.speaker, "start": u.start, "end": u.end, "text": u.text}
-            for u in (transcript.utterances or [])
-        ]
+        if status["status"] == "error":
+            return jsonify({"erro": status.get("error", "erro desconhecido")}), 500
 
-        # 5) Gera resumo e insights via OpenAI
-        summary, insights = gerar_resumo_insights(full_text)
+        full_text  = status["text"]
+        utterances = status.get("utterances", [])
 
-    except Exception as e:
-        return jsonify({"erro": str(e)}), 500
-    finally:
-        # 6) Limpa o arquivo temporário
-        try:
-            os.remove(audio_path)
-        except OSError:
-            pass
-
-    # 7) Retorna tudo em JSON
-    return jsonify({
-        "transcricao": full_text,
-        "diarizacao": utterances,
-        "resumo": summary,
-        "insights": insights
-    })
-
-def gerar_resumo_insights(texto_completo: str):
-    prompt = f"""
+        # 5) Gera resumo + insights com gpt-3.5-turbo
+        prompt = f"""
 Você é um assistente que recebe a transcrição completa de uma reunião:
 
-{texto_completo}
+{full_text}
 
 1) Forneça um resumo executivo em até 5 frases.
 2) Liste 5 insights ou próximos passos em formato de bullets.
 
 Responda apenas em JSON, no formato:
-{{"resumo":"...","insights":["...","...",...]}}
+{{ "resumo": "...", "insights": ["...", "...", ...] }}
 """
-    # 8) Usa gpt-3.5-turbo em vez de gpt-4
-    resp = openai.chat.completions.create(
-        model="gpt-3.5-turbo",
-        messages=[{"role": "user", "content": prompt}],
-        temperature=0.3
-    )
-    content = resp.choices[0].message.content.strip()
-    data = json.loads(content)
-    return data.get("resumo",""), data.get("insights",[])
+        ai_resp = openai.ChatCompletion.create(
+            model       = "gpt-3.5-turbo",
+            messages    = [{"role":"user","content":prompt}],
+            temperature = 0.3
+        )
+        content = ai_resp.choices[0].message.content.strip()
+        data    = json.loads(content)
+        resumo  = data.get("resumo", "")
+        insights= data.get("insights", [])
+
+    finally:
+        # 6) Limpa o temporário
+        try: os.remove(audio_path)
+        except: pass
+
+    # 7) Retorna tudo
+    return jsonify({
+        "transcricao": full_text,
+        "diarizacao": utterances,
+        "resumo":      resumo,
+        "insights":    insights
+    })
 
 if __name__ == "__main__":
-    port = int(os.getenv("PORT", 5000))
+    # Porta obrigatória no Render é obtida via $PORT
+    port = int(os.getenv("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
