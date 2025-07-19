@@ -1,17 +1,16 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
-  <meta charset="UTF-8" />
+  <meta charset="UTF-8">
   <title>Transcrição Automática</title>
   <style>
-    body { font-family: Arial, sans-serif; background:#f7f7f7; text-align:center; padding:40px }
-    .container { background:#fff; padding:35px; border-radius:10px; box-shadow:0 4px 12px rgba(0,0,0,0.1); display:inline-block }
-    h1 { font-size:24px; margin-bottom:20px }
-    button { font-size:16px; padding:10px 20px; margin:5px; background:#1e88e5; color:#fff; border:none; border-radius:5px; cursor:pointer }
-    button:disabled { background:#ccc; cursor:default }
-    #status { margin:10px 0; font-weight:bold }
-    textarea { width:100%; height:100px; margin-top:10px; }
-    #summary, #insights { text-align:left; margin-top:20px }
+    body { font-family: Arial; background:#f7f7f7; text-align:center; padding:40px }
+    .container { background:#fff; padding:30px; border-radius:8px; display:inline-block; box-shadow:0 2px 8px rgba(0,0,0,0.1) }
+    h1 { margin-bottom:20px }
+    button { padding:12px 24px; margin:0 8px; font-size:16px; border:none; border-radius:4px; cursor:pointer }
+    button:disabled { opacity:0.5; cursor:default }
+    #output { width:100%; height:120px; margin-top:16px }
+    #summary, #insights { text-align:left; max-width:600px; margin:16px auto }
   </style>
 </head>
 <body>
@@ -19,73 +18,68 @@
     <h1>🎙️ Transcrição Automática</h1>
     <button id="startBtn">Iniciar Gravação</button>
     <button id="stopBtn" disabled>Parar Gravação</button>
-    <div id="status">Pronto para gravar</div>
-    <textarea id="transcription" placeholder="A transcrição aparecerá aqui..." readonly></textarea>
-    <div id="summary"><strong>Resumo:</strong><p></p></div>
-    <div id="insights"><strong>Insights:</strong><ul></ul></div>
+    <p id="status"></p>
+    <textarea id="output" placeholder="A transcrição aparecerá aqui..."></textarea>
+    <h2>Resumo:</h2>
+    <div id="summary"></div>
+    <h2>Insights:</h2>
+    <ul id="insights"></ul>
   </div>
 
   <script>
-    let recorder, audioChunks = [];
+    let recorder, chunks;
     const startBtn = document.getElementById("startBtn");
     const stopBtn  = document.getElementById("stopBtn");
-    const statusEl = document.getElementById("status");
-    const transcriptionEl = document.getElementById("transcription");
-    const summaryEl = document.querySelector("#summary p");
-    const insightsEl = document.querySelector("#insights ul");
+    const status   = document.getElementById("status");
+    const output   = document.getElementById("output");
+    const summary  = document.getElementById("summary");
+    const insights = document.getElementById("insights");
 
     startBtn.onclick = async () => {
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        recorder = new MediaRecorder(stream);
-        audioChunks = [];
-        recorder.ondataavailable = e => audioChunks.push(e.data);
-        recorder.start();
-        statusEl.textContent = "Gravando…";
-        startBtn.disabled = true;
-        stopBtn.disabled  = false;
-      } catch (err) {
-        statusEl.textContent = "Permissão de microfone negada";
-      }
+      // prepara UI
+      output.value = "";
+      summary.innerText = "";
+      insights.innerHTML = "";
+      status.innerText = "Gravando…";
+
+      // pede permissão e inicia gravação
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      recorder = new MediaRecorder(stream);
+      chunks = [];
+      recorder.ondataavailable = e => chunks.push(e.data);
+      recorder.onstop = sendAudioToServer;
+      recorder.start();
+
+      startBtn.disabled = true;
+      stopBtn.disabled  = false;
     };
 
     stopBtn.onclick = () => {
       recorder.stop();
-      statusEl.textContent = "Processando áudio…";
-      stopBtn.disabled = true;
-      recorder.onstop = async () => {
-        const blob = new Blob(audioChunks, { type: "audio/webm" });
-        const form = new FormData();
-        form.append("audio", blob, "gravacao.webm");
-
-        try {
-          const resp = await fetch("/transcrever", {
-            method: "POST",
-            body: form
-          });
-          if (!resp.ok) {
-            const err = await resp.json();
-            statusEl.textContent = "Erro: " + (err.erro||resp.statusText);
-            startBtn.disabled = false;
-            return;
-          }
-          const data = await resp.json();
-          transcriptionEl.value = data.transcricao || "";
-          summaryEl.textContent  = data.resumo       || "";
-          insightsEl.innerHTML   = "";
-          (data.insights||[]).forEach(item => {
-            const li = document.createElement("li");
-            li.textContent = item;
-            insightsEl.appendChild(li);
-          });
-          statusEl.textContent = "Transcrição concluída";
-        } catch (e) {
-          statusEl.textContent = "Falha ao enviar o áudio";
-        } finally {
-          startBtn.disabled = false;
-        }
-      };
+      startBtn.disabled = false;
+      stopBtn.disabled  = true;
+      status.innerText = "Processando áudio…";
     };
+
+    async function sendAudioToServer() {
+      const blob = new Blob(chunks, { type: "audio/webm" });
+      const form = new FormData();
+      form.append("audio", blob, "reuniao.webm");
+
+      try {
+        const res = await fetch("/transcrever", { method:"POST", body: form });
+        const json = await res.json();
+        if (!res.ok) throw json;
+
+        // preenche resultados
+        output.value   = json.transcricao;
+        summary.innerText = json.resumo;
+        insights.innerHTML = json.insights.map(i => `<li>${i}</li>`).join("");
+        status.innerText = "✅ Transcrição concluída";
+      } catch (err) {
+        status.innerText = "Erro: " + (err.erro || JSON.stringify(err));
+      }
+    }
   </script>
 </body>
 </html>
